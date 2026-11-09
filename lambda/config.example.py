@@ -26,6 +26,10 @@ LLM_REASONING_EFFORT = "none"
 # Free Tavily key (1,000 searches/month, no credit card) from https://app.tavily.com
 SEARCH_API_KEY = "paste-your-tavily-key-here"
 
+# Wikipedia (free, no key) is used for factual questions in parallel with Tavily.
+# Set it to your skill's language: "en", "pt", "es", "de", "fr"...
+WIKIPEDIA_LANG = "en"
+
 # --- Optional: persona and clock -------------------------------------------------------------
 # Give the assistant a name and it will stay in character (see docs/08-customize.md).
 ASSISTANT_NAME = ""

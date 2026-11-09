@@ -12,7 +12,7 @@ Every entry below is a problem we actually hit while building this.
 | "I've used up today's free quota..." (HTTP 429, long wait) | Daily free cap reached (e.g. 50/day on some routers) | Wait for the reset, add credit, or switch to a provider without a daily cap |
 | "That was a lot of questions in a row..." (HTTP 429, short wait) | Per-minute rate limit | Wait the given seconds |
 | "Error: model or address not found" (HTTP 404) | Wrong model ID or base URL, **or** the model is listed but not deployed | `python scripts/benchmark_models.py --list` and try another |
-| "The model took too long to answer" | The model is too slow or queued | Benchmark and pick a faster model (step 2) |
+| "The model took too long to answer" | The model is too slow, or both the first attempt and the retry got queued | Benchmark and pick a faster model (step 2). Occasional spikes on free endpoints are normal |
 | "The model returned an empty answer" | A **reasoning model** spent all its tokens thinking | Keep `LLM_REASONING_EFFORT = "none"`; or raise `MAX_TOKENS`; or switch models |
 | "The model provider returned error 400" | Provider rejects `reasoning_effort` | Set `LLM_REASONING_EFFORT = ""` |
 
@@ -39,6 +39,11 @@ Every entry below is a problem we actually hit while building this.
 
 | Symptom | Fix |
 |---|---|
+| Factual answers are often wrong, even about old facts | Small models answer badly from memory. Make sure factual questions get sources: Tavily key set, `_should_search` / `_should_use_wikipedia` cover the intent |
+| It says "according to [some site]" when it didn't search | The prompt must forbid citing sources it wasn't given (see `BASE_PROMPT`). Never write "mention the source" without that condition |
+| It refuses more and more as the conversation goes on ("you can check a website...") | It copies its own earlier evasive replies. Keep `MAX_HISTORY_MESSAGES` small and forbid sending the user elsewhere in the prompt |
+| Innocent questions get a canned "I'm your assistant" reply | The identity guard is too broad. Match only first-person sentences and strip only those (`_strip_identity_leaks`) |
+| It only searches when you insist ("search for...") | Keyword-only triggers miss most questions. Search factual intents by default (`FACT_INTENTS`) |
 | It introduces itself by its model name | Set `ASSISTANT_NAME` (persona examples + leak guard) |
 | It reads out asterisks or emojis | Already handled by `_for_speech`. Add any other symbols you hear |
 | It states made-up "current" numbers | Add a Tavily key. Without one, the prompt already tells it to flag possibly outdated info |
@@ -49,6 +54,9 @@ Every entry below is a problem we actually hit while building this.
 
 | Symptom | Fix |
 |---|---|
+| Wikipedia returns an unrelated article (a town, a novel...) | Its search matches title words. Let the model name the article first (`_wikipedia_title`) and keep the examples in `WIKIPEDIA_TITLE_PROMPT` |
+| Outdated answer to "who is the current coach/president..." | Role-now questions must skip Wikipedia (`_CURRENT_ROLE_PATTERN`): the model picks articles about outdated people |
+| Wikipedia HTTP 429 | Rate limit on bursts (you'll see it while testing, rarely in normal use). The skill continues without Wikipedia |
 | Search always fails with HTTP 400 | An unsupported parameter combination (e.g. `country` with `search_depth: "fast"`). The log shows Tavily's message |
 | Answers based on old pages | Use `search_depth: "basic"` and avoid the `language` filter (see [step 7](07-web-search.md)) |
 | It searches for things that don't need it | Narrow `_CURRENT_INFO_PATTERN` / `_TIME_WORDS_PATTERN` |

@@ -17,7 +17,9 @@ import re
 import time
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import openai
 from openai import OpenAI
@@ -67,6 +69,14 @@ REASONING_EFFORT = _setting("LLM_REASONING_EFFORT", "none")
 SEARCH_API_KEY = _setting("SEARCH_API_KEY")
 SEARCH_URL = "https://api.tavily.com/search"
 
+# Wikipedia: official API, free, no key. Runs in parallel with Tavily for factual questions.
+# Use the language code of your skill's locale ("en", "pt", "es", "de"...).
+WIKIPEDIA_LANG = _setting("WIKIPEDIA_LANG", "en")
+WIKIPEDIA_API = "https://{}.wikipedia.org/w/api.php".format(WIKIPEDIA_LANG)
+WIKIPEDIA_MAX_CHARS = 1200
+# Wikimedia asks API clients to send a descriptive User-Agent.
+HTTP_USER_AGENT = "AlexaAIAssistant/1.0 (personal Alexa skill; low volume)"
+
 # Persona. Leave ASSISTANT_NAME empty for a neutral assistant (see docs/08-customize.md).
 ASSISTANT_NAME = _setting("ASSISTANT_NAME")
 # Time zone for "today's date" in the prompt. IANA name (needs Python 3.9+) or a fixed UTC offset.
@@ -79,11 +89,18 @@ UTC_OFFSET_HOURS = float(_setting("UTC_OFFSET_HOURS", "0") or 0)
 ALEXA_DEADLINE_SECONDS = 7.3   # total budget (search + model), measured from the handler start
 REQUEST_TIMEOUT_SECONDS = 6.5  # max time for the model call alone
 MIN_LLM_TIMEOUT_SECONDS = 2.0
+# Free endpoints sometimes leave a request stuck in a queue for 6+ s. When there's time, the first
+# attempt is cut early and a second attempt uses the rest of the budget.
+LLM_RETRY_RESERVE_SECONDS = 2.5
+LLM_TIMEOUT_SPEECH = "The model took too long to answer. Please try again."
+WIKIPEDIA_TITLE_TIMEOUT_SECONDS = 1.5
 SEARCH_TIMEOUT_SECONDS = 2.5
 SEARCH_MAX_RESULTS = 4
 SEARCH_MAX_CONTEXT_CHARS = 2200
 MAX_TOKENS = 400
-MAX_HISTORY_MESSAGES = 10      # ~5 turns of conversation kept in the session
+# Only the last 3 exchanges. Small models copy the style of their own earlier replies, and with a
+# long history one evasive answer ("you can check a website...") turned into a habit.
+MAX_HISTORY_MESSAGES = 6
 
 # ---------------------------------------------------------------------------
 # Prompt and persona
@@ -97,13 +114,16 @@ BASE_PROMPT = (
     "aloud; separate lines of a poem only with line breaks. If you don't know, say so. "
     "Get straight to the point: don't open with greetings or close with goodbyes unless the "
     "user is greeting you or saying goodbye. Don't assume the user's gender. "
-    "In this mode you can only talk: never promise to control devices, play music, set alarms "
-    "or buy things. Don't mention this limit unless the user asks for one of those things; "
-    "then kindly say that in this mode you can only chat, and that they can say \"stop\" and "
-    "ask again. "
-    "Sometimes you receive web search results gathered just now: when you do, prefer them over "
-    "what you already know for current facts, mention the source site if helpful, never read "
-    "web addresses aloud, and don't comment on whether you searched; just answer."
+    "You can't control devices, play music, set alarms or buy things. Only mention this if the "
+    "user asks for one of those; then kindly say they can say \"stop\" and ask again. "
+    "Always answer the question directly with the best answer you have. Never tell the user to "
+    "look it up on websites, search engines or books, and never say you don't have access to "
+    "information unless you truly don't know the answer. "
+    "Sometimes you receive sources gathered just now (Wikipedia and/or web search results): when "
+    "you do, base your answer on them and prefer them over what you already know. NEVER invent "
+    "sources: only say \"according to X\" if X appears in the sources given for this question; "
+    "without sources, don't name any website, newspaper or institution. Never read web addresses "
+    "aloud, and don't comment on whether you searched; just answer."
 )
 
 
@@ -132,10 +152,12 @@ def _persona_examples():
     ]
 
 
-# Safety net: replies where the model breaks character and talks about its own identity.
+# Safety net: FIRST-PERSON sentences where the model breaks character. Only those sentences are
+# removed (see _strip_identity_leaks). A broad pattern like "language model" also hid good
+# answers: "what is ChatGPT?" -> "ChatGPT is a large language model..." looked like a leak.
 _IDENTITY_LEAK_PATTERN = re.compile(
-    r"\blanguage model\b"
-    r"|\bi(?:['’]m| am)\s+(?:an?\s+)?(?:ai|artificial intelligence|chatbot|bot|robot|model)\b"
+    r"\bas an?\s+(?:ai\s+)?(?:large\s+)?language model\b"
+    r"|\bi(?:['’]m| am)\s+(?:an?\s+)?(?:(?:large\s+)?language model|ai|artificial intelligence|chatbot|bot|robot|model)\b"
     r"|\bi\s+(?:was|have been|['’]ve been)\s+(?:trained|created|developed|built|made)\s+by\b"
     r"|\bassistant\s+(?:that was\s+|who was\s+)?(?:trained|created|developed|built|made)\s+by\b"
     r"|\bi(?:['’]m| am)\s+(?:nemotron|llama|qwen|deepseek|gemma|mistral|chatgpt|gpt|claude|gemini)\b",
@@ -145,6 +167,16 @@ _IDENTITY_LEAK_PATTERN = re.compile(
 
 def _persona_fallback():
     return "I'm {}, your voice assistant! How can I help you?".format(ASSISTANT_NAME)
+
+
+def _strip_identity_leaks(text):
+    """Drop only the out-of-character sentences and keep the rest of the answer."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    kept = [s for s in sentences if not _IDENTITY_LEAK_PATTERN.search(s)]
+    if len(kept) == len(sentences):
+        return text
+    logger.info("Removed %d out-of-character sentence(s).", len(sentences) - len(kept))
+    return " ".join(kept).strip() or _persona_fallback()
 
 
 GREETINGS = [
@@ -222,6 +254,133 @@ def _needs_search(query, is_question=True):
     return is_question and bool(_TIME_WORDS_PATTERN.search(text))
 
 
+# Factual questions ALWAYS search. Small, fast models get many facts wrong from memory (even old
+# ones) and invent sources; with search they answer from real results. Intent names must match
+# QUESTION_INTENT_PREFIXES below.
+FACT_INTENTS = {
+    "QueryIntent", "QuestionWhoIntent", "QuestionWhosIntent", "QuestionWhatIntent",
+    "QuestionWhatsIntent", "QuestionWhenIntent", "QuestionWhereIntent", "QuestionWhichIntent",
+    "QuestionIsIntent", "QuestionAreIntent", "QuestionCanIntent", "QuestionDoIntent",
+    "QuestionDoesIntent",
+}
+# Explanations: Wikipedia helps (free), web search only with current-info signals.
+EXPLAIN_INTENTS = {"QuestionWhyIntent", "QuestionHowIntent", "RequestDescribeIntent"}
+_MATH_PATTERN = re.compile(
+    r"\d\s*(times|x|plus|minus|divided by|to the power of|\+|-|\*|/)\s*\d|square root|percent of")
+_ABOUT_ASSISTANT_PATTERN = re.compile(r"\b(you|your|yours|yourself)\b")
+_INFO_REQUEST_PATTERN = re.compile(
+    r"^(tell me|talk|explain)(\s+more)?\s+(about|of)\b|\bwhat do you know about\b|\bnews\b")
+# "Who is the coach / president / CEO..." asks who holds a role NOW. The model suggested
+# Wikipedia articles about outdated people, so these skip Wikipedia and use web search only.
+_CURRENT_ROLE_PATTERN = re.compile(
+    r"\b(current|currently|now|today)\b|"
+    r"^(is|are)?\s*(the\s+)?(head\s+)?(coach|manager|president|prime minister|minister|governor|"
+    r"mayor|ceo|owner|director|pope|king|queen|leader|champions?)\b")
+
+
+def _about_assistant(text):
+    # "do you know who won..." is about the world, not about the assistant.
+    text = re.sub(r"^(you know|you think)\s+", "", text)
+    return bool(_ABOUT_ASSISTANT_PATTERN.search(text))
+
+
+def _should_search(intent_name, slot_value):
+    """Is it worth a web search? slot_value is the text without the intent's leading word."""
+    if intent_name in FORCE_SEARCH_INTENTS:
+        return True
+    text = _normalize(slot_value)
+    if _MATH_PATTERN.search(text) or _about_assistant(text):
+        return False
+    if intent_name in FACT_INTENTS:
+        return True
+    if intent_name == CATCH_ALL_INTENT:
+        return bool(_INFO_REQUEST_PATTERN.search(text)) or _needs_search(slot_value, False)
+    return _needs_search(slot_value, True)
+
+
+def _should_use_wikipedia(intent_name, slot_value):
+    text = _normalize(slot_value)
+    if _MATH_PATTERN.search(text) or _about_assistant(text) or _CURRENT_ROLE_PATTERN.search(text):
+        return False
+    return (intent_name in FACT_INTENTS or intent_name in EXPLAIN_INTENTS
+            or intent_name in FORCE_SEARCH_INTENTS
+            or (intent_name == CATCH_ALL_INTENT and bool(_INFO_REQUEST_PATTERN.search(text))))
+
+
+# Wikipedia's search matches title words, not meaning ("why is the sky blue" can find a town or a
+# song). So the model first names the article that answers the question (~0.3 s).
+WIKIPEDIA_TITLE_PROMPT = (
+    "Give the title of the Wikipedia article (language code: {lang}) that best answers the "
+    "question. Reply with ONLY the title: no quotes, no question mark, no explanation. Never "
+    "repeat the question; name the topic. If the question is about who holds a role NOW (coach, "
+    "president, CEO, current champion), give the article about the role or the institution, "
+    "never a person's name. If no article makes sense (chit-chat, creative request, arithmetic), "
+    "reply NONE.\n"
+    "Examples:\n"
+    "why is the sky blue -> Rayleigh scattering\n"
+    "who discovered penicillin -> Penicillin\n"
+    "who is the president of france -> President of France\n"
+    "who is the ceo of apple -> Apple Inc.\n"
+    "thanks -> NONE"
+)
+
+
+def _wikipedia_title(query, timeout):
+    """Ask the model which article to look up. Returns a search term, or None for no article."""
+    if _client is None:
+        return query
+    try:
+        completion = _client.chat.completions.create(
+            model=MODEL, max_tokens=20, temperature=0, timeout=timeout,
+            messages=[{"role": "system", "content": WIKIPEDIA_TITLE_PROMPT.format(lang=WIKIPEDIA_LANG)},
+                      {"role": "user", "content": query}],
+            extra_body={"reasoning_effort": REASONING_EFFORT} if REASONING_EFFORT else None)
+    except Exception as exc:  # noqa: BLE001 - fall back to searching with the question itself
+        logger.info("Wikipedia title unavailable: %r", exc)
+        return query
+    title = (completion.choices[0].message.content or "").strip().split("\n")[0]
+    title = title.strip(" \"'.?").split("->")[-1].strip()
+    if not title or title.upper().startswith("NONE"):
+        return None
+    return title
+
+
+def _wikipedia_intro(query, timeout):
+    """Find the article that answers the question and return its intro, or None.
+
+    Two steps: the model names the article, then one API call (generator=search) returns the
+    intro text. Disambiguation pages are skipped. Any failure (timeout, HTTP 429...) -> None.
+    """
+    started = time.monotonic()
+    term = _wikipedia_title(query, min(WIKIPEDIA_TITLE_TIMEOUT_SECONDS, timeout))
+    remaining = timeout - (time.monotonic() - started)
+    if not term or remaining < 0.3:
+        return None
+    params = {
+        "action": "query", "format": "json", "formatversion": "2",
+        "generator": "search", "gsrsearch": term, "gsrlimit": "3",
+        "prop": "extracts|pageprops", "ppprop": "disambiguation",
+        "exintro": "1", "explaintext": "1", "exchars": str(WIKIPEDIA_MAX_CHARS), "redirects": "1",
+    }
+    request = urllib.request.Request(WIKIPEDIA_API + "?" + urllib.parse.urlencode(params),
+                                     headers={"User-Agent": HTTP_USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=remaining) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Wikipedia failed after %.2fs: %r", time.monotonic() - started, exc)
+        return None
+    pages = sorted(data.get("query", {}).get("pages", []), key=lambda p: p.get("index", 99))
+    for page in pages:
+        if "disambiguation" in (page.get("pageprops") or {}):
+            continue
+        extract = " ".join((page.get("extract") or "").split())
+        if extract:
+            logger.info("Wikipedia: '%s' in %.2fs", page.get("title"), time.monotonic() - started)
+            return "[Wikipedia article \"{}\"] {}".format(page.get("title"), extract)
+    return None
+
+
 def _web_search(query, timeout):
     """Search with Tavily. Returns context text for the model, or None on failure."""
     payload = {
@@ -267,15 +426,25 @@ def _web_search(query, timeout):
     return "\n".join(lines)[:SEARCH_MAX_CONTEXT_CHARS] if lines else None
 
 
-def _search_context(results):
-    return (
-        "Web search results gathered just now about the question. Today is {}. Careful: snippets "
-        "may come from old pages. If a snippet has a date, use it and say when the information is "
-        "from. Never call a number (price, rate, score) today's unless the snippet clearly shows "
-        "today's date; otherwise say it's the most recent value you found and it may have changed. "
-        "Compare every date with today's: if a snippet says something will happen on a date that "
-        "has already passed, say it already happened.\n{}"
-    ).format(_today(), results)
+def _sources_context(wiki, results):
+    parts = [
+        "Sources gathered just now to answer the question. Today is {}.".format(_today()),
+        "For established facts (history, science, geography, biographies, definitions), trust the "
+        "Wikipedia excerpt first, if it is about the topic asked. For recent events, who holds a "
+        "role now, results and current numbers, prefer the most recent web results. If the "
+        "Wikipedia excerpt is about something else, ignore it.",
+    ]
+    if results:
+        parts.append(
+            "Careful: web snippets may come from old pages. If a snippet has a date, use it and say "
+            "when the information is from. Never call a number (price, rate, score) today's unless "
+            "the snippet clearly shows today's date. Compare every date with today's: if something "
+            "was going to happen on a date that has passed, say it already happened.")
+    if wiki:
+        parts.append(wiki)
+    if results:
+        parts.append("Web search results:\n" + results)
+    return "\n".join(parts)
 
 
 NO_SEARCH_CONTEXT = (
@@ -342,14 +511,13 @@ def _ask_llm(history, context=None, timeout=REQUEST_TIMEOUT_SECONDS):
             extra_body={"reasoning_effort": REASONING_EFFORT} if REASONING_EFFORT else None)
         logger.info("LLM answered in %.2fs (%s)", time.monotonic() - started, MODEL)
         text = _for_speech(completion.choices[0].message.content or "")
-        if ASSISTANT_NAME and _IDENTITY_LEAK_PATTERN.search(text):
-            logger.info("Reply broke character; using the persona fallback.")
-            text = _persona_fallback()
+        if ASSISTANT_NAME:
+            text = _strip_identity_leaks(text)
         if not text:
             return False, "The model returned an empty answer. Try asking another way."
         return True, text
     except openai.APITimeoutError:
-        speak = "The model took too long to answer. Please try again."
+        speak = LLM_TIMEOUT_SPEECH
     except openai.AuthenticationError:
         speak = "Authentication error: the API key was rejected. Check the key in config dot py."
     except openai.PermissionDeniedError:
@@ -443,6 +611,7 @@ class AskModelIntentHandler(AbstractRequestHandler):
             if slots.get(slot_name) is not None and slots[slot_name].value:
                 query = slots[slot_name].value
                 break
+        slot_value = query or ""
         prefix = QUESTION_INTENT_PREFIXES.get(intent.name, "")
         if query and prefix:
             query = "{} {}".format(prefix, query)
@@ -453,18 +622,27 @@ class AskModelIntentHandler(AbstractRequestHandler):
         forced = intent.name in FORCE_SEARCH_INTENTS
         is_question = intent.name != CATCH_ALL_INTENT or query.rstrip().endswith("?")
         wants_current_info = forced or _needs_search(query, is_question)
-        do_search = bool(SEARCH_API_KEY) and wants_current_info
+        do_search = bool(SEARCH_API_KEY) and _should_search(intent.name, slot_value)
+        use_wiki = _should_use_wikipedia(intent.name, slot_value)
 
         _send_progressive_response(
-            handler_input, "Let me look that up..." if do_search else "Hmm, let me think...")
+            handler_input, "Let me look that up..." if (do_search or use_wiki) else "Hmm, let me think...")
 
         context, notice = None, ""
-        if do_search:
+        if do_search or use_wiki:
             remaining = ALEXA_DEADLINE_SECONDS - (time.monotonic() - started) - MIN_LLM_TIMEOUT_SECONDS
-            results = _web_search(query, timeout=max(0.5, min(SEARCH_TIMEOUT_SECONDS, remaining)))
-            context = _search_context(results) if results else (
-                "The web search failed just now. Answer with what you know and add, in one short "
-                "sentence, that it may be outdated.")
+            budget = max(0.5, min(SEARCH_TIMEOUT_SECONDS, remaining))
+            # Wikipedia and Tavily at the same time: total wait is the slower one, not the sum.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                wiki_future = pool.submit(_wikipedia_intro, query, budget) if use_wiki else None
+                web_future = pool.submit(_web_search, query, budget) if do_search else None
+                wiki = wiki_future.result() if wiki_future else None
+                results = web_future.result() if web_future else None
+            if wiki or results:
+                context = _sources_context(wiki, results)
+            elif do_search:
+                context = ("The web search failed just now. Answer with what you know and add, in "
+                           "one short sentence, that it may be outdated.")
         elif forced:
             notice = "Web search isn't set up, so here's what I already know. "
         if wants_current_info and not context:
@@ -472,10 +650,17 @@ class AskModelIntentHandler(AbstractRequestHandler):
 
         attr = handler_input.attributes_manager.session_attributes
         history = attr.get("history", [])
-        llm_timeout = max(MIN_LLM_TIMEOUT_SECONDS, min(
-            REQUEST_TIMEOUT_SECONDS, ALEXA_DEADLINE_SECONDS - (time.monotonic() - started)))
-        ok, answer = _ask_llm(history + [{"role": "user", "content": query}],
-                              context=context, timeout=llm_timeout)
+        messages = history + [{"role": "user", "content": query}]
+        remaining = ALEXA_DEADLINE_SECONDS - (time.monotonic() - started)
+        if remaining >= MIN_LLM_TIMEOUT_SECONDS + LLM_RETRY_RESERVE_SECONDS:
+            first_timeout = min(REQUEST_TIMEOUT_SECONDS, remaining - LLM_RETRY_RESERVE_SECONDS)
+        else:
+            first_timeout = max(MIN_LLM_TIMEOUT_SECONDS, min(REQUEST_TIMEOUT_SECONDS, remaining))
+        ok, answer = _ask_llm(messages, context=context, timeout=first_timeout)
+        remaining = ALEXA_DEADLINE_SECONDS - (time.monotonic() - started)
+        if not ok and answer == LLM_TIMEOUT_SPEECH and remaining >= MIN_LLM_TIMEOUT_SECONDS:
+            logger.info("First attempt timed out; retrying with %.1fs.", remaining)
+            ok, answer = _ask_llm(messages, context=context, timeout=remaining)
         if ok:
             answer = notice + answer
             # Only successful exchanges go into the history, so errors don't pollute the context.

@@ -34,7 +34,7 @@ class FakeModel:
     """Stands in for _ask_llm and _web_search and records what they received."""
 
     def __init__(self, ok=True, answer="Fine answer."):
-        self.ok, self.answer, self.calls, self.searches = ok, answer, [], []
+        self.ok, self.answer, self.calls, self.searches, self.wikis = ok, answer, [], [], []
 
     def ask(self, history, context=None, timeout=0):
         self.calls.append({"history": history, "context": context, "timeout": timeout})
@@ -44,16 +44,20 @@ class FakeModel:
         self.searches.append(query)
         return "[1] Example - example.com: some current fact"
 
+    def wiki(self, query, timeout):
+        self.wikis.append(query)
+        return '[Wikipedia article "Example"] An encyclopedic fact.'
+
 
 class SkillTests(unittest.TestCase):
     def setUp(self):
         self.fake = FakeModel()
-        self._orig = (lf._ask_llm, lf._web_search, lf.SEARCH_API_KEY)
-        lf._ask_llm, lf._web_search = self.fake.ask, self.fake.search
+        self._orig = (lf._ask_llm, lf._web_search, lf._wikipedia_intro, lf.SEARCH_API_KEY)
+        lf._ask_llm, lf._web_search, lf._wikipedia_intro = self.fake.ask, self.fake.search, self.fake.wiki
         lf.SEARCH_API_KEY = ""
 
     def tearDown(self):
-        lf._ask_llm, lf._web_search, lf.SEARCH_API_KEY = self._orig
+        lf._ask_llm, lf._web_search, lf._wikipedia_intro, lf.SEARCH_API_KEY = self._orig
 
     def speak(self, out):
         return out["response"]["outputSpeech"]["ssml"]
@@ -83,6 +87,46 @@ class SkillTests(unittest.TestCase):
         lf.lambda_handler(envelope("SearchIntent", "tallest building in the world"), None)
         self.assertEqual(self.fake.searches, ["tallest building in the world"])
         self.assertIn("Web search results", self.fake.calls[-1]["context"])
+
+    def test_fact_question_uses_search_and_wikipedia(self):
+        lf.SEARCH_API_KEY = "test"
+        lf.lambda_handler(envelope("QuestionWhoIntent", "discovered penicillin"), None)
+        self.assertEqual(self.fake.searches, ["who discovered penicillin"])
+        self.assertEqual(self.fake.wikis, ["who discovered penicillin"])
+        context = self.fake.calls[-1]["context"]
+        self.assertIn("Wikipedia article", context)
+        self.assertIn("Web search results", context)
+
+    def test_current_role_question_skips_wikipedia(self):
+        lf.SEARCH_API_KEY = "test"
+        lf.lambda_handler(envelope("QuestionWhoIntent", "is the coach of the brazil national team"), None)
+        self.assertEqual(len(self.fake.searches), 1)
+        self.assertEqual(self.fake.wikis, [])
+
+    def test_wikipedia_works_without_search_key(self):
+        lf.lambda_handler(envelope("QuestionWhyIntent", "is the sky blue"), None)
+        self.assertEqual(self.fake.searches, [])
+        self.assertIn("Wikipedia article", self.fake.calls[-1]["context"])
+
+    def test_no_sources_for_creative_math_or_self(self):
+        lf.SEARCH_API_KEY = "test"
+        lf.lambda_handler(envelope("RequestWriteIntent", "a poem about the sea"), None)
+        lf.lambda_handler(envelope("QuestionWhatIntent", "is 17 times 23"), None)
+        lf.lambda_handler(envelope("QuestionWhatsIntent", "your name"), None)
+        self.assertEqual((self.fake.searches, self.fake.wikis), ([], []))
+
+    def test_retry_after_timeout(self):
+        attempts = []
+
+        def flaky(history, context=None, timeout=0):
+            attempts.append(timeout)
+            return (False, lf.LLM_TIMEOUT_SPEECH) if len(attempts) == 1 else (True, "Second try.")
+        lf._ask_llm = flaky
+        out = lf.lambda_handler(envelope("RequestWriteIntent", "a poem"), None)
+        self.assertEqual(len(attempts), 2)
+        # The first attempt must leave room in Alexa's window for the retry.
+        self.assertLessEqual(attempts[0], lf.ALEXA_DEADLINE_SECONDS - lf.LLM_RETRY_RESERVE_SECONDS)
+        self.assertIn("Second try.", self.speak(out))
 
     def test_no_search_for_venting(self):
         lf.SEARCH_API_KEY = "test"
@@ -118,11 +162,23 @@ class HelperTests(unittest.TestCase):
                  "I was trained by researchers.", "I am Nemotron.",
                  "I'm a voice assistant trained by researchers from NVIDIA."]
         fine = ["The radio was developed by several inventors.", "NVIDIA makes graphics cards.",
-                "I'm happy to help!", "The vaccine was developed by researchers at Oxford."]
+                "I'm happy to help!", "The vaccine was developed by researchers at Oxford.",
+                "ChatGPT is a large language model made by OpenAI."]
         for t in leaks:
             self.assertTrue(lf._IDENTITY_LEAK_PATTERN.search(t), t)
         for t in fine:
             self.assertFalse(lf._IDENTITY_LEAK_PATTERN.search(t), t)
+
+    def test_strip_identity_leaks_keeps_good_sentences(self):
+        text = "AI learns patterns from data. I was trained by NVIDIA researchers. Ask me more!"
+        self.assertEqual(lf._strip_identity_leaks(text), "AI learns patterns from data. Ask me more!")
+
+    def test_search_policy(self):
+        self.assertTrue(lf._should_search("QuestionWhoIntent", "wrote dom casmurro"))
+        self.assertTrue(lf._should_search("QuestionDoIntent", "you know who won the world cup"))
+        self.assertFalse(lf._should_search("QuestionWhyIntent", "is the sky blue"))
+        self.assertTrue(lf._should_search("FreeTalkIntent", "tell me about the war in ukraine"))
+        self.assertFalse(lf._should_search("FreeTalkIntent", "today was a rough day"))
 
     def test_placeholders_count_as_empty(self):
         os.environ["SEARCH_API_KEY"] = "paste-your-tavily-key-here"

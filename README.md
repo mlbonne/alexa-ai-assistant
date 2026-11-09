@@ -24,8 +24,10 @@ server, an AWS account or a credit card. Everything runs on free tiers.
   in a config file, with no code changes.
 - **Natural conversation:** speak freely, follow up without saying "Alexa", and the skill
   remembers the conversation while it's open.
-- **Free web search** ([Tavily](https://tavily.com), 1,000 searches/month). It searches only when
-  a question needs current information.
+- **Grounded answers.** Factual questions are answered from sources, not the model's memory:
+  the matching **Wikipedia** article (free, no key) and **free web search**
+  ([Tavily](https://tavily.com), 1,000 searches/month) run in parallel. Small, fast models get
+  many facts wrong from memory; with sources they don't.
 - **Built for the ~8-second limit:** fast model choice, a strict time budget, and a spoken error
   instead of Alexa's generic failure.
 - **Voice-safe output:** strips markdown, emojis and characters that would break Alexa's speech.
@@ -39,9 +41,11 @@ flowchart LR
     U[You speak] --> E[Echo device]
     E --> A[Alexa voice service<br/>matches your words to an intent]
     A --> L[Your skill code<br/>Alexa-hosted, Python]
-    L -- only for current-info questions --> T[Tavily web search]
+    L -- factual questions --> T[Tavily web search]
+    L -- factual questions, in parallel --> W[Wikipedia API]
     T --> L
-    L -- question + search results --> M[LLM API<br/>OpenAI-compatible]
+    W --> L
+    L -- question + sources --> M[LLM API<br/>OpenAI-compatible]
     M --> L
     L -- text --> A
     A --> E
@@ -62,7 +66,7 @@ by name ("Alexa, open smart helper") and everything you say goes to your code un
 | [4. Add the code](docs/04-add-the-code.md) | Paste the code and your config, then deploy (console only) | 10 min |
 | [5. Use the ASK CLI (optional)](docs/05-ask-cli.md) | Deploy and test from your terminal instead of clicking | 20 min |
 | [6. Test on your Echo](docs/06-test-on-your-echo.md) | Simulator, then the real device | 10 min |
-| [7. Web search](docs/07-web-search.md) | How search is triggered, tuned, and where it falls short | read |
+| [7. Web search and Wikipedia](docs/07-web-search.md) | When sources are used, how they're tuned, and where they fall short | read |
 | [8. Customize](docs/08-customize.md) | Persona, language, invocation name, provider, timeouts | read |
 | [9. Troubleshooting](docs/09-troubleshooting.md) | Every error we hit and how to fix it | reference |
 

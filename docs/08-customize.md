@@ -12,10 +12,11 @@ Set `ASSISTANT_NAME` in `config.py` (e.g. `"Nova"`). The skill then:
    far better than rules. With rules alone, our test model kept saying "I'm Nemotron, a
    language model". The examples end with a system note saying they're only style examples;
    without it, the model treated them as real ("How did that job interview go?");
-3. checks every reply with `_IDENTITY_LEAK_PATTERN`. If the model still breaks character ("I'm
-   an AI", "I was trained by...", "a voice assistant trained by..."), the reply is replaced
-   with a short in-character one. The pattern only matches self-descriptions, so "the vaccine
-   was developed by researchers at Oxford" passes.
+3. checks every reply with `_IDENTITY_LEAK_PATTERN` and **removes only the out-of-character
+   sentences** ("I'm an AI", "I was trained by..."). The rest of the answer is kept. The
+   pattern only matches **first-person** self-descriptions. An earlier, broader version ("language
+   model" anywhere) hid perfectly good answers like "ChatGPT is a large language model", which
+   users heard as refusals.
 
 To change the personality itself (warmer, funnier, more formal...), edit `BASE_PROMPT`.
 Ideas that worked well for us:
@@ -38,14 +39,19 @@ To run the skill in another language (for example Portuguese):
    `INVOCATION_NAME`, the leading words in `SEARCHQUERY_INTENTS` and the `CATCH_ALL_VALUES`.
    Set `LOCALE` (e.g. `"pt-BR"`) and run it. Keep the intent **names** the same, or update both
    files together.
-3. **`lambda_function.py`:** translate:
+3. **`config.py`:** set `WIKIPEDIA_LANG` (e.g. `"pt"`).
+4. **`lambda_function.py`:** translate:
+   - `WIKIPEDIA_TITLE_PROMPT` and its examples (they teach the model how to name articles in
+     that language's Wikipedia);
+   - `FACT_INTENTS`, `EXPLAIN_INTENTS` and the patterns in `_should_search`,
+     `_should_use_wikipedia` and `_CURRENT_ROLE_PATTERN`;
    - `QUESTION_INTENT_PREFIXES` (the words put back in front of questions);
    - `BASE_PROMPT` (also add "always answer in <language>");
    - `GREETINGS`, `GOODBYES` and every spoken message;
    - the search word lists;
    - `_today()`, which uses English day and month names;
    - the persona examples.
-4. **Check the model's quality** in your language with `scripts/benchmark_models.py --prompt "..."`.
+5. **Check the model's quality** in your language with `scripts/benchmark_models.py --prompt "..."`.
    Some fast models are much weaker outside English.
 
 Tip: build intents for the question words people actually start sentences with in that language
@@ -67,6 +73,7 @@ At the top of `lambda_function.py`:
 | `REQUEST_TIMEOUT_SECONDS` | 6.5 | Max for the model call alone |
 | `SEARCH_TIMEOUT_SECONDS` | 2.5 | Max for the search |
 | `MAX_TOKENS` | 400 | Answer length cap (spoken answers should be short) |
-| `MAX_HISTORY_MESSAGES` | 10 | Conversation turns remembered (~5 exchanges) |
+| `MAX_HISTORY_MESSAGES` | 6 | Messages remembered (3 exchanges). Keep it short: small models copy the style of their own earlier replies, so one evasive answer can become a habit |
+| `LLM_RETRY_RESERVE_SECONDS` | 2.5 | Time kept for one retry when the first model call gets stuck |
 
 The OpenAI client runs with `max_retries=0`. Automatic retries would blow the 8-second window.
