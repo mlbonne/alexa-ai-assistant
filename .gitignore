@@ -1,0 +1,14 @@
+# Secrets: your keys live here. Never commit them.
+lambda/config.py
+.env
+*.env
+
+# ASK CLI local state (contains your skill ID) and the cloned hosted-skill repo
+.ask/
+hosted-skill/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

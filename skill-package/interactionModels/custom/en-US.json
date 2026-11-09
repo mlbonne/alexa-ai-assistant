@@ -1,0 +1,520 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "smart helper",
+      "intents": [
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "QueryIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "ask {query}",
+            "question {query}",
+            "tell me {query}",
+            "tell me about {query}",
+            "explain {query}",
+            "i want to know {query}",
+            "talk about {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhoIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "who {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhosIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "who's {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhatIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "what {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhatsIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "what's {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhenIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "when {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhereIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "where {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhyIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "why {query}"
+          ]
+        },
+        {
+          "name": "QuestionHowIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "how {query}"
+          ]
+        },
+        {
+          "name": "QuestionWhichIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "which {query}"
+          ]
+        },
+        {
+          "name": "QuestionIsIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "is {query}"
+          ]
+        },
+        {
+          "name": "QuestionAreIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "are {query}"
+          ]
+        },
+        {
+          "name": "QuestionCanIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "can {query}"
+          ]
+        },
+        {
+          "name": "QuestionDoIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "do {query}"
+          ]
+        },
+        {
+          "name": "QuestionDoesIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "does {query}"
+          ]
+        },
+        {
+          "name": "QuestionShouldIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "should {query}"
+          ]
+        },
+        {
+          "name": "RequestWriteIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "write {query}"
+          ]
+        },
+        {
+          "name": "RequestCreateIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "create {query}"
+          ]
+        },
+        {
+          "name": "RequestMakeIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "make {query}"
+          ]
+        },
+        {
+          "name": "RequestGiveMeIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "give me {query}"
+          ]
+        },
+        {
+          "name": "RequestSuggestIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "suggest {query}"
+          ]
+        },
+        {
+          "name": "RequestRecommendIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "recommend {query}"
+          ]
+        },
+        {
+          "name": "RequestTranslateIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "translate {query}"
+          ]
+        },
+        {
+          "name": "RequestSummarizeIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "summarize {query}"
+          ]
+        },
+        {
+          "name": "RequestCalculateIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "calculate {query}"
+          ]
+        },
+        {
+          "name": "RequestDescribeIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "describe {query}"
+          ]
+        },
+        {
+          "name": "SearchIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "search {query}",
+            "search for {query}",
+            "search the web for {query}"
+          ]
+        },
+        {
+          "name": "SearchLookUpIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "look up {query}"
+          ]
+        },
+        {
+          "name": "SearchFindIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "find {query}",
+            "find out {query}"
+          ]
+        },
+        {
+          "name": "FreeTalkIntent",
+          "slots": [
+            {
+              "name": "phrase",
+              "type": "FreeText"
+            }
+          ],
+          "samples": [
+            "{phrase}"
+          ]
+        }
+      ],
+      "types": [
+        {
+          "name": "FreeText",
+          "values": [
+            {
+              "name": {
+                "value": "i have a headache what should i do"
+              }
+            },
+            {
+              "name": {
+                "value": "help me pick a gift for my mom"
+              }
+            },
+            {
+              "name": {
+                "value": "translate good morning into spanish"
+              }
+            },
+            {
+              "name": {
+                "value": "explain relativity in simple terms"
+              }
+            },
+            {
+              "name": {
+                "value": "give me a quick dinner idea with chicken"
+              }
+            },
+            {
+              "name": {
+                "value": "i have a big meeting tomorrow and i'm nervous"
+              }
+            },
+            {
+              "name": {
+                "value": "tell me a fun fact about space"
+              }
+            },
+            {
+              "name": {
+                "value": "summarize the history of the roman empire"
+              }
+            },
+            {
+              "name": {
+                "value": "what is the difference between a virus and bacteria"
+              }
+            },
+            {
+              "name": {
+                "value": "my plant has yellow leaves"
+              }
+            },
+            {
+              "name": {
+                "value": "i want to learn to play the guitar"
+              }
+            },
+            {
+              "name": {
+                "value": "make up a bedtime story about a dragon"
+              }
+            },
+            {
+              "name": {
+                "value": "my dog won't eat"
+              }
+            },
+            {
+              "name": {
+                "value": "suggest a name for my cat"
+              }
+            },
+            {
+              "name": {
+                "value": "today was a rough day at work"
+              }
+            },
+            {
+              "name": {
+                "value": "tell me more about that"
+              }
+            },
+            {
+              "name": {
+                "value": "and then what"
+              }
+            },
+            {
+              "name": {
+                "value": "i didn't get it can you explain again"
+              }
+            },
+            {
+              "name": {
+                "value": "give me an example"
+              }
+            },
+            {
+              "name": {
+                "value": "is that true"
+              }
+            },
+            {
+              "name": {
+                "value": "keep going"
+              }
+            },
+            {
+              "name": {
+                "value": "surprise me"
+              }
+            },
+            {
+              "name": {
+                "value": "thank you"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

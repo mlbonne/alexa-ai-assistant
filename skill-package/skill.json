@@ -1,0 +1,34 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "name": "Smart Helper",
+          "summary": "Talk to an AI model through your Echo.",
+          "description": "A personal Alexa skill that answers open questions with a large language model and can search the web for current information.",
+          "examplePhrases": [
+            "Alexa, open smart helper",
+            "Alexa, ask smart helper who invented the radio",
+            "Alexa, ask smart helper what's the tallest building in the world"
+          ],
+          "keywords": ["ai", "assistant", "chat", "questions"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "testingInstructions": "Personal use. Requires lambda/config.py with an LLM API key.",
+      "category": "KNOWLEDGE_AND_TRIVIA",
+      "distributionCountries": ["US"]
+    },
+    "apis": {
+      "custom": {}
+    },
+    "manifestVersion": "1.0",
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false
+    }
+  }
+}
